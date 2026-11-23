@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import type { Profile } from './types/profile'
 import { supabase } from './lib/supabase'
@@ -8,6 +8,7 @@ import YouthProgression from './YouthProgression'
 import MyRecord from './MyRecord'
 import PatrolAssignments from './PatrolAssignments'
 import UnitAdmin from './UnitAdmin'
+import ProgressionOverview from './ProgressionOverview'
 
 type Section = 'overview' | 'youth' | 'patrols' | 'progression' | 'admin' | 'my-record'
 type UnitRecord = { id: string; name: string; active: boolean }
@@ -65,66 +66,103 @@ export default function Dashboard({ profile, email, onSignOut, signingOut }: {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [unitsRevision, setUnitsRevision] = useState(0)
+  const requests = useRef(0)
 
   const loadData = useCallback(async () => {
+    const request = ++requests.current
     setLoading(true)
     setLoadError('')
 
-    const [unitsResult, youthResult, patrolsResult, membershipsResult, progressionResult] = await Promise.all([
-      supabase.from('units').select('id, name, active').order('name'),
-      supabase.from('youth').select('id, display_name, legacy_name, active, unit_id, scout_years, promise_date').order('display_name'),
-      supabase.from('patrols').select('id, name, active, unit_id').order('name'),
-      supabase.from('patrol_memberships').select('youth_id, patrol_id, school_year, post_name').order('school_year', { ascending: false }),
-      supabase.from('progression_entries').select('id', { count: 'exact', head: true }).eq('active', true),
-    ])
+    try {
+      const { data: yearResponse, error: yearError } = await supabase.functions.invoke<{
+        school_year?: string
+        error?: string
+      }>('manage-patrols', { body: { action: 'current-year' } })
 
-    const firstError = unitsResult.error || youthResult.error || patrolsResult.error || membershipsResult.error
-    if (firstError) {
-      setLoadError(`Impossible de charger les données. ${firstError.message}`)
-      setLoading(false)
-      return
-    }
-
-    const unitRows = (unitsResult.data ?? []) as UnitRecord[]
-    setUnits(unitRows)
-    const unitNames = new Map(unitRows.map((unit) => [unit.id, unit.name]))
-    const patrolRows = (patrolsResult.data ?? []) as Omit<PatrolRecord, 'unitName'>[]
-    const patrolNames = new Map(patrolRows.map((patrol) => [patrol.id, patrol.name]))
-    const membershipRows = (membershipsResult.data ?? []) as MembershipRecord[]
-    const latestMembership = new Map<string, MembershipRecord>()
-    for (const membership of membershipRows) {
-      if (!latestMembership.has(membership.youth_id)) latestMembership.set(membership.youth_id, membership)
-    }
-
-    const youthRows = (youthResult.data ?? []) as {
-      id: string; display_name: string | null; legacy_name: string | null; active: boolean
-      unit_id: string | null; scout_years: number | null; promise_date: string | null
-    }[]
-
-    setPatrols(patrolRows.map((patrol) => ({
-      ...patrol,
-      unitName: unitNames.get(patrol.unit_id) ?? 'Unité non précisée',
-    })).sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'fr')))
-    setYouth(youthRows.map((record) => {
-      const membership = latestMembership.get(record.id)
-      const patrol = membership ? patrolNames.get(membership.patrol_id) : undefined
-      return {
-        id: record.id,
-        name: record.display_name?.trim() || record.legacy_name?.trim() || 'Nom non renseigné',
-        active: record.active,
-        unit_id: record.unit_id,
-        unitName: record.unit_id ? unitNames.get(record.unit_id) ?? 'Unité non précisée' : 'Sans unité',
-        patrol: patrol ?? 'Non assigné',
-        schoolYear: membership?.school_year ?? '—',
-        scoutYears: record.scout_years,
-        promiseDate: record.promise_date,
+      if (yearError) {
+        throw new Error(`Impossible de récupérer l’année scolaire courante. ${yearError.message}`)
       }
-    }).sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'fr')))
-    setProgressionCount(progressionResult.error ? null : progressionResult.count ?? 0)
-    setLoading(false)
+
+      const schoolYear = yearResponse?.school_year
+
+      if (yearResponse?.error || typeof schoolYear !== 'string' || !schoolYear) {
+        throw new Error(yearResponse?.error ?? 'Année scolaire courante introuvable.')
+      }
+
+      if (request !== requests.current) return
+
+      const [unitsResult, youthResult, patrolsResult, membershipsResult, progressionResult] = await Promise.all([
+        supabase.from('units').select('id, name, active').order('name'),
+        supabase.from('youth').select('id, display_name, legacy_name, active, unit_id, scout_years, promise_date').order('display_name'),
+        supabase.from('patrols').select('id, name, active, unit_id').order('name'),
+        supabase.from('patrol_memberships').select('youth_id, patrol_id, school_year, post_name').eq('school_year', schoolYear),
+        supabase.from('progression_entries').select('id', { count: 'exact', head: true }).eq('active', true),
+      ])
+
+      if (request !== requests.current) return
+
+      const firstError = unitsResult.error || youthResult.error || patrolsResult.error || membershipsResult.error
+      if (firstError) {
+        setLoadError(`Impossible de charger les données. ${firstError.message}`)
+        return
+      }
+
+      const unitRows = (unitsResult.data ?? []) as UnitRecord[]
+      const unitNames = new Map(unitRows.map((unit) => [unit.id, unit.name]))
+      const patrolRows = (patrolsResult.data ?? []) as Omit<PatrolRecord, 'unitName'>[]
+      const patrolNames = new Map(patrolRows.map((patrol) => [patrol.id, patrol.name]))
+      const membershipRows = (membershipsResult.data ?? []) as MembershipRecord[]
+      const currentMembership = new Map<string, MembershipRecord>()
+
+      for (const membership of membershipRows) {
+        if (!currentMembership.has(membership.youth_id)) {
+          currentMembership.set(membership.youth_id, membership)
+        }
+      }
+      const youthRows = (youthResult.data ?? []) as {
+        id: string; display_name: string | null; legacy_name: string | null; active: boolean
+        unit_id: string | null; scout_years: number | null; promise_date: string | null
+      }[]
+
+      setUnits(unitRows)
+      setPatrols(patrolRows.map((patrol) => ({
+        ...patrol,
+        unitName: unitNames.get(patrol.unit_id) ?? 'Unité non précisée',
+      })).sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'fr')))
+
+      setYouth(youthRows.map((record) => {
+        const membership = currentMembership.get(record.id)
+        const patrol = membership ? patrolNames.get(membership.patrol_id) : undefined
+        return {
+          id: record.id,
+          name: record.display_name?.trim() || record.legacy_name?.trim() || 'Nom non renseigné',
+          active: record.active,
+          unit_id: record.unit_id,
+          unitName: record.unit_id ? unitNames.get(record.unit_id) ?? 'Unité non précisée' : 'Sans unité',
+          patrol: patrol ?? 'Non assigné',
+          schoolYear: membership?.school_year ?? '—',
+          scoutYears: record.scout_years,
+          promiseDate: record.promise_date,
+        }
+      }).sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'fr')))
+
+      setProgressionCount(progressionResult.error ? null : progressionResult.count ?? 0)
+    } catch (cause) {
+      if (request === requests.current) {
+        setLoadError(cause instanceof Error
+          ? `Impossible de charger les données. ${cause.message}`
+          : 'Impossible de charger les données.')
+      }
+    } finally {
+      if (request === requests.current) setLoading(false)
+    }
   }, [])
 
-  useEffect(() => { void loadData() }, [loadData])
+  useEffect(() => {
+    void loadData()
+    return () => { requests.current++ }
+  }, [loadData])
+
 
   const filteredYouth = useMemo(() => youth.filter((record) =>
     (showInactive || record.active) && `${record.name} ${record.patrol} ${record.unitName}`.toLocaleLowerCase('fr').includes(search.toLocaleLowerCase('fr')),
@@ -154,8 +192,7 @@ export default function Dashboard({ profile, email, onSignOut, signingOut }: {
       </aside>
 
       <main className="app-main">
-        <header className="topbar"><div className="breadcrumb">Éclaireur <span>/</span> {currentTitle}</div><div className="topbar-right"><span className="season-pill">Saison 2026–2027</span><div className="topbar-avatar">{(profile.display_name || email || 'U').slice(0, 1).toUpperCase()}</div></div></header>
-        <div className="page-content">
+          <header className="topbar"><div className="breadcrumb">Éclaireur <span>/</span> {currentTitle}</div><div className="topbar-right"><span className="season-pill">Saison 2026–2027</span></div></header>        <div className="page-content">
           <div className="page-heading"><div><p className="page-eyebrow">266e GROUPE SCOUT · POINTE-DE-L’ÎLE</p><h1>{selectedYouth ? selectedYouth.name : section === 'overview' ? 'Bonjour et bienvenue !' : currentTitle}</h1><p className="page-subtitle">{selectedYouth ? `${selectedYouth.patrol} · ${selectedYouth.unitName}` : section === 'overview' ? 'Aperçu des données actuellement accessibles.' : section === 'admin' ? 'Gestion des accès et des responsabilités.' : 'Suivi des jeunes et de leur parcours scout.'}</p></div>{section === 'youth' && <button className="primary-action" type="button" onClick={() => { setSearch(''); setShowInactive(false) }}>Réinitialiser les filtres</button>}</div>
 
           <div className="data-status"><span>SUPABASE</span><p>Les listes de jeunes, de patrouilles et les indicateurs ci-dessous proviennent de la base de données. Les données affichées respectent les autorisations du compte connecté.</p><button type="button" onClick={() => void loadData()} disabled={loading}>{loading ? 'Actualisation…' : 'Actualiser'}</button></div>
@@ -195,7 +232,7 @@ export default function Dashboard({ profile, email, onSignOut, signingOut }: {
               <div className="detail-stats">
                 <div><span>Années scoutes</span><strong>{selectedYouth.scoutYears ?? '—'}</strong></div>
                 <div><span>Date de promesse</span><strong>{selectedYouth.promiseDate ? new Date(`${selectedYouth.promiseDate}T00:00:00`).toLocaleDateString('fr-CA') : '—'}</strong></div>
-                <div><span>Dernière affectation</span><strong>{selectedYouth.schoolYear}</strong></div>
+                <div><span>Affectation courante</span><strong>{selectedYouth.schoolYear}</strong></div>
               </div>
               <div className="progression-detail-heading"><h3>Parcours individuel</h3><p>Historique des réalisations et des entrées de progression.</p></div>
               <YouthProgression key={selectedYouth.id} youthId={selectedYouth.id} profile={profile} onChanged={() => void loadData()} />
@@ -221,7 +258,12 @@ export default function Dashboard({ profile, email, onSignOut, signingOut }: {
             </section>
           )}
 
-          {section === 'progression' && <section className="content-grid"><article className="panel panel-wide"><div className="panel-heading"><div><h2>Les quatre Labels</h2><p>Parcours de progression Éclaireur</p></div></div><div className="progression-levels">{[['Brousse','Premiers pas et découverte'],['Piste','Développer son autonomie'],['Sentier','Approfondir ses compétences'],['Route','Prendre des responsabilités']].map(([name, description], index) => <div className="level-card" key={name}><span className={`level-number level-${index}`}>{index + 1}</span><div><strong>{name}</strong><p>{description}</p></div><span className="level-arrow">→</span></div>)}</div></article><article className="panel"><div className="panel-heading"><div><h2>Les composantes</h2><p>Repères et brevets</p></div></div><div className="component-list"><div><span>✦</span><strong>Repères</strong><small>Développement des sphères PICASSo</small></div><div><span>⚒</span><strong>Brevets</strong><small>Compétences et réalisations</small></div><div><span>◎</span><strong>Défis</strong><small>Trois défis personnels par Label</small></div></div><p className="module-note">Le catalogue est présenté ici; la lecture détaillée des entrées sera reliée ensuite.</p></article></section>}
+          {section === 'progression' && (
+            <ProgressionOverview
+              youth={youth}
+              profile={profile}
+            />
+          )}
 
           {section === 'my-record' && <MyRecord profile={profile} />}
 
@@ -231,8 +273,17 @@ export default function Dashboard({ profile, email, onSignOut, signingOut }: {
                 <h2>Administration de l’application</h2>
                 <p>Les modules ci-dessous sont déjà connectés à Supabase. Les modifications qu’ils effectuent sont réelles.</p>
               </section>
-              <UnitAdmin onUnitsChanged={() => setUnitsRevision((value) => value + 1)} />
-              <InvitationAdmin />
+              <UnitAdmin
+                onUnitsChanged={async () => {
+                  await loadData()
+                  setUnitsRevision((value) => value + 1)
+                }}
+              />
+              <InvitationAdmin
+                youth={youth
+                  .filter((record) => record.active)
+                  .map((record) => ({ id: record.id, name: record.name }))}
+              />
               <AnimatorAssignmentAdmin refreshKey={unitsRevision} />
             </div>
           )}
@@ -308,7 +359,24 @@ function YouthEditForm({ youth, units, onSaved }: {
       <div><h2>Modifier le dossier</h2><p>Ces renseignements ne modifient pas les affectations historiques.</p></div>
       <form className="youth-create-form" onSubmit={(event) => void handleSubmit(event)}>
         <label>Nom affiché<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={100} required disabled={saving} /></label>
-        <label>Unité<select value={unitId} onChange={(event) => setUnitId(event.target.value)} required disabled={saving}><option value="">Sélectionner une unité</option>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}{unit.active ? '' : ' (inactive)'}</option>)}</select></label>
+        <label>
+          Unité
+          <select
+            value={unitId}
+            onChange={(event) => setUnitId(event.target.value)}
+            required
+            disabled={saving}
+          >
+            <option value="">Sélectionner une unité</option>
+            {units
+              .filter((unit) => unit.active || unit.id === youth.unit_id)
+              .map((unit) => (
+                <option key={unit.id} value={unit.id}>
+                  {unit.name}{unit.active ? '' : ' (inactive)'}
+                </option>
+              ))}
+          </select>
+        </label>
         <label>Années scoutes<input type="number" min="0" step="1" value={scoutYears} onChange={(event) => setScoutYears(event.target.value)} disabled={saving} /></label>
         <label>Date de promesse<input type="date" value={promiseDate} onChange={(event) => setPromiseDate(event.target.value)} disabled={saving} /></label>
         <button type="submit" disabled={saving || !displayName.trim() || !unitId}>{saving ? 'Enregistrement…' : 'Enregistrer les modifications'}</button>
@@ -366,7 +434,7 @@ function PatrolManagementActions({ patrol, onUpdated }: {
           if (replacementName?.trim() && window.confirm(`Créer « ${replacementName.trim()} », transférer tous les jeunes de ${patrol.name} pour l’année courante et archiver l’ancienne patrouille ?`)) void submit('replace', replacementName)
         }} disabled={saving}>Remplacer + transférer</button>
         <button type="button" onClick={() => {
-          if (window.confirm(`Archiver la patrouille « ${patrol.name} » ? Les jeunes affectés pour l’année en cours doivent d’abord être transférés.`)) void submit('archive')
+          if (window.confirm(`Archiver la patrouille « ${patrol.name} » ? Les jeunes actifs affectés pour l’année en cours doivent d’abord être transférés.`)) void submit('archive')
         }} disabled={saving}>Archiver</button>
       </> : <>
         <input aria-label="Nouveau nom de patrouille" value={name} onChange={(event) => setName(event.target.value)} maxLength={100} disabled={saving} />
@@ -392,6 +460,7 @@ function YouthCreateForm({ units, loading, onCreated }: {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (saving) return
     setError('')
     setMessage('')
     setSaving(true)
@@ -620,5 +689,39 @@ function YouthManagementActions({ youth, onUpdated, onDone }: {
 
 function YouthTable({ youth, onSelect }: { youth: YouthRecord[]; onSelect: (youth: YouthRecord) => void }) {
   if (youth.length === 0) return <div className="empty-table">Aucun jeune ne correspond à la recherche.</div>
-  return <div className="table-scroll"><table className="youth-table"><thead><tr><th>Jeune</th><th>Patrouille</th><th>Unité</th><th>Années scoutes</th><th>Statut</th><th /></tr></thead><tbody>{youth.map((item) => <tr key={item.id} className={!item.active ? 'inactive-row' : ''}><td><strong>{item.name}</strong></td><td>{item.patrol}</td><td>{item.unitName}</td><td>{item.scoutYears ?? '—'}</td><td><span className={item.active ? 'status-active' : 'status-inactive'}>{item.active ? 'Actif' : 'Inactif'}</span></td><td><button className="row-action" onClick={() => onSelect(item)} aria-label={`Consulter ${item.name}`}>→</button></td></tr>)}</tbody></table></div>
+
+  return (
+    <div className="table-scroll">
+      <table className="youth-table">
+        <thead>
+          <tr>
+            <th>Jeune</th>
+            <th>Patrouille</th>
+            <th>Unité</th>
+            <th>Années scoutes</th>
+            <th>Statut</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {youth.map((item) => (
+            <tr key={item.id} className={!item.active ? 'inactive-row' : ''}>
+              <td data-label="Jeune"><strong>{item.name}</strong></td>
+              <td data-label="Patrouille">{item.patrol}</td>
+              <td data-label="Unité">{item.unitName}</td>
+              <td data-label="Années scoutes">{item.scoutYears ?? '—'}</td>
+              <td data-label="Statut">
+                <span className={item.active ? 'status-active' : 'status-inactive'}>
+                  {item.active ? 'Actif' : 'Inactif'}
+                </span>
+              </td>
+              <td data-label="Consulter">
+                <button className="row-action" onClick={() => onSelect(item)} aria-label={`Consulter ${item.name}`}>→</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }

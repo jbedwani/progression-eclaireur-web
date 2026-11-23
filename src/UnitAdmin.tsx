@@ -84,7 +84,9 @@ export default function UnitAdmin({
       if (data?.error) throw new Error(data.error)
 
       const labels = {
-        create: 'Unité créée.',
+        create: data?.action === 'restored'
+          ? 'Unité réactivée.'
+          : 'Unité créée.',
         rename: 'Nom de l’unité modifié.',
         archive: 'Unité archivée.',
         restore: 'Unité réactivée.',
@@ -96,6 +98,18 @@ export default function UnitAdmin({
       onUnitsChanged()
     } catch (cause) {
       console.error(`Erreur manage-units (${action}) :`, cause)
+
+      if (action === 'rename' && unitId) {
+        const originalUnit = units.find((unit) => unit.id === unitId)
+
+        if (originalUnit) {
+          setNames((current) => ({
+            ...current,
+            [unitId]: originalUnit.name,
+          }))
+        }
+      }
+
       setError(await getErrorMessage(cause))
     } finally {
       setSaving(null)

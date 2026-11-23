@@ -15,3 +15,353 @@ body { min-height: 100vh; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: wait; }
+
+
+/* Progression collective */
+
+.progression-overview-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.progression-overview-stats article {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 1.15rem;
+  min-width: 0;
+  min-height: 105px;
+  background: #fff;
+  border: 1px solid #e0e7e1;
+  border-top: 3px solid #285c43;
+  border-radius: 10px;
+  box-shadow: 0 2px 5px rgb(30 60 40 / 4%);
+}
+
+.progression-overview-stats strong {
+  font-size: 1.9rem;
+  line-height: 1.1;
+  color: #285c43;
+  font-variant-numeric: tabular-nums;
+}
+
+.progression-overview-stats span {
+  color: #68766e;
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+
+.progression-overview-filters {
+  display: grid;
+  grid-template-columns: 1.5fr repeat(3, minmax(150px, 1fr));
+  align-items: end;
+  gap: 12px;
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #e5eae3;
+  border-radius: 12px;
+  box-shadow: 0 3px 12px rgb(28 53 36 / 3%);
+}
+
+.progression-overview-filters label {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  color: #526257;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.progression-overview-filters input,
+.progression-overview-filters select {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 10px;
+  border: 1px solid #ccd8ce;
+  border-radius: 8px;
+  background: #fff;
+  color: #1e3328;
+  font: inherit;
+}
+
+.progression-overview-filters input:focus,
+.progression-overview-filters select:focus {
+  outline: 3px solid rgb(54 123 78 / 14%);
+  border-color: #367b4e;
+}
+
+.progression-overview-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #e0e7e1;
+  border-radius: 12px;
+}
+
+.progression-overview-table {
+  width: 100%;
+  min-width: 850px;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.progression-overview-table th,
+.progression-overview-table td {
+  padding: 0.85rem 0.9rem;
+  border-bottom: 1px solid #edf0ed;
+  vertical-align: middle;
+}
+
+.progression-overview-table th {
+  color: #53645a;
+  background: #f7f9f6;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.progression-overview-table td {
+  font-size: 0.9rem;
+}
+
+.progression-overview-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.progression-overview-table tbody tr:hover {
+  background: #f8faf7;
+}
+
+.progression-overview-table .inactive-row {
+  color: #8a938d;
+  background: #f7f7f5;
+}
+
+.overview-challenge-count {
+  display: inline-block;
+  min-width: 2.8rem;
+  padding: 0.3rem 0.5rem;
+  color: #285c43;
+  background: #eaf2ec;
+  border-radius: 6px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-dots {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 100px;
+}
+
+.overview-dot {
+  display: inline-flex;
+  flex: 0 0 23px;
+  width: 23px;
+  height: 23px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.overview-dot-completed {
+  color: #fff;
+  background: var(--badge-color);
+  border: 1px solid var(--badge-color);
+}
+
+.overview-dot-progress {
+  color: var(--badge-color);
+  background: conic-gradient(
+    var(--badge-color) var(--progress),
+    color-mix(in srgb, var(--badge-color) 18%, white) var(--progress)
+  );
+  border: 1px solid var(--badge-color);
+  position: relative;
+}
+
+.overview-dot-progress::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  background: #fff;
+  border-radius: 50%;
+}
+
+.overview-dot-progress > * {
+  position: relative;
+  z-index: 1;
+}
+
+.overview-dot-not-started {
+  color: var(--badge-color);
+  background: color-mix(in srgb, var(--badge-color) 9%, white);
+  border: 1px solid color-mix(in srgb, var(--badge-color) 35%, white);
+}
+
+/* Colibri : fond blanc et contour violet dans tous les états */
+.overview-dot-colibri.overview-dot-completed {
+  color: #4e3892;
+  background: #fff;
+  border: 2px solid #4e3892;
+}
+
+.overview-dot-colibri.overview-dot-progress {
+  background: conic-gradient(
+    #4e3892 var(--progress),
+    #fff var(--progress)
+  );
+  border: 2px solid #4e3892;
+}
+
+.overview-dot-colibri.overview-dot-progress::after {
+  background: #fff;
+}
+
+.overview-dot-colibri.overview-dot-not-started {
+  background: #fff;
+  border: 2px solid #4e3892;
+}
+
+.overview-no-items {
+  color: #a0aaa2;
+}
+
+.progression-overview-count {
+  margin: 0;
+  color: #68766e;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 1000px) {
+  .progression-overview-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .progression-overview-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .progression-overview-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .progression-overview-filters {
+    grid-template-columns: 1fr;
+    padding: 15px;
+  }
+
+  .progression-overview-toolbar {
+    align-items: flex-start;
+  }
+
+  .progression-overview-stats article {
+    min-height: 90px;
+    padding: 0.9rem;
+  }
+}
+
+.overview-youth-row {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.progression-overview-table tbody .overview-youth-row:hover {
+  background: #edf4ee;
+}
+
+.progression-overview-table tbody .overview-youth-row:focus-visible {
+  outline: 2px solid #285c43;
+  outline-offset: -2px;
+  background: #edf4ee;
+}
+
+.progression-overview-table .row-action {
+  min-width: 34px;
+  min-height: 34px;
+  border-radius: 7px;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+@media (max-width: 600px) {
+  .progression-overview-table-wrap {
+    overflow-x: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .progression-overview-table,
+  .progression-overview-table tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .progression-overview-table thead {
+    display: none;
+  }
+
+  .progression-overview-table tbody tr.overview-youth-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 12px;
+    margin-bottom: 12px;
+    padding: 15px;
+    border: 1px solid #e0e7e1;
+    border-radius: 12px;
+    background: #fff;
+  }
+
+  .progression-overview-table tbody tr.overview-youth-row td {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    white-space: normal;
+  }
+
+  .progression-overview-table tbody tr.overview-youth-row td::before {
+    content: attr(data-label);
+    color: #89948b;
+    font-size: 9px;
+    font-weight: 700;
+  }
+
+  .progression-overview-table tbody tr.overview-youth-row td:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .progression-overview-table tbody tr.overview-youth-row td:nth-child(5),
+  .progression-overview-table tbody tr.overview-youth-row td:nth-child(6) {
+    grid-column: 1 / -1;
+  }
+
+  .progression-overview-table tbody tr.overview-youth-row td:last-child {
+    grid-column: 1 / -1;
+    align-items: flex-end;
+  }
+
+  .progression-overview-table tbody tr:not(.overview-youth-row) {
+    display: block;
+  }
+
+  .progression-overview-table tbody tr:not(.overview-youth-row) td {
+    display: block;
+    padding: 12px;
+    white-space: normal;
+  }
+}

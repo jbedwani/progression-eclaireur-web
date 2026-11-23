@@ -4,6 +4,15 @@ import { supabase } from './lib/supabase'
 
 type InvitationRole = 'guardian' | 'youth' | 'animator'
 
+type YouthOption = {
+  id: string
+  name: string
+}
+
+type InvitationAdminProps = {
+  youth: YouthOption[]
+}
+
 type Invitation = {
   id: string
   intended_email: string
@@ -37,7 +46,7 @@ function invitationStatus(invitation: Invitation): string {
   return 'En attente'
 }
 
-export default function InvitationAdmin() {
+export default function InvitationAdmin({ youth }: InvitationAdminProps) {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<InvitationRole>('guardian')
   const [expiresInDays, setExpiresInDays] = useState('7')
@@ -47,6 +56,7 @@ export default function InvitationAdmin() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [selectedYouthIds, setSelectedYouthIds] = useState<string[]>([])
 
   async function loadInvitations() {
     setLoading(true)
@@ -93,6 +103,7 @@ export default function InvitationAdmin() {
               email: email.trim(),
               role,
               expiresInDays: Number(expiresInDays),
+              youthIds: selectedYouthIds,
             },
           },
         )
@@ -108,6 +119,7 @@ export default function InvitationAdmin() {
         `Invitation créée pour ${email.trim()}. Copie le lien ci-dessous pour le transmettre.`,
       )
       setEmail('')
+      setSelectedYouthIds([])
       await loadInvitations()
     } catch (cause) {
       if (cause instanceof FunctionsHttpError) {
@@ -213,14 +225,51 @@ export default function InvitationAdmin() {
         <select
           id="invitation-role"
           value={role}
-          onChange={(event) =>
+          onChange={(event) => {
             setRole(event.target.value as InvitationRole)
-          }
+            setSelectedYouthIds([])
+          }}
         >
           <option value="guardian">Parent ou tuteur</option>
           <option value="youth">Éclaireur</option>
           <option value="animator">Animateur</option>
         </select>
+
+        {role !== 'animator' && (
+          <fieldset className="invitation-youth-selection">
+            <legend>
+              {role === 'guardian'
+                ? 'Jeunes associés à ce parent'
+                : 'Dossier de l’Éclaireur'}
+            </legend>
+
+            {youth.length === 0 ? (
+              <p>Aucun dossier de jeune actif disponible.</p>
+            ) : (
+              youth.map((record) => (
+                <label key={record.id}>
+                  <input
+                    type={role === 'youth' ? 'radio' : 'checkbox'}
+                    name={role === 'youth' ? 'invitation-youth' : undefined}
+                    checked={selectedYouthIds.includes(record.id)}
+                    onChange={(event) => {
+                      if (role === 'youth') {
+                        setSelectedYouthIds([record.id])
+                      } else {
+                        setSelectedYouthIds((current) =>
+                          event.target.checked
+                            ? [...current, record.id]
+                            : current.filter((id) => id !== record.id),
+                        )
+                      }
+                    }}
+                  />
+                  {record.name}
+                </label>
+              ))
+            )}
+          </fieldset>
+        )}
 
         <label htmlFor="invitation-expiry">Validité du lien</label>
         <select

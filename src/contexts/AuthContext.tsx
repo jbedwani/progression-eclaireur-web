@@ -28,8 +28,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true
+    let profileRequest = 0
 
     async function loadProfile(userId: string) {
+      const request = ++profileRequest
       setProfile(null)
       setProfileError(null)
 
@@ -39,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('id', userId)
         .maybeSingle()
 
-      if (!active) return
+      if (!active || request !== profileRequest) return
 
       if (error) {
         setProfileError('Impossible de vérifier votre profil.')
@@ -89,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession)
+      profileRequest++
 
       if (!nextSession) {
         setProfile(null)

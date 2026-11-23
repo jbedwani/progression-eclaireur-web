@@ -37,41 +37,57 @@ export default function PatrolAssignments({ youth, patrols, onChanged }: {
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
-    const { data: yearResponse, error: yearError } = await supabase.functions.invoke<{ school_year?: string; error?: string }>('manage-patrols', { body: { action: 'current-year' } })
-    if (yearError) {
-      setError((await invokeError(yearError, 'Année scolaire courante introuvable.')).message)
+
+    try {
+      const { data: yearResponse, error: yearError } = await supabase.functions.invoke<{
+        school_year?: string
+        error?: string
+      }>('manage-patrols', { body: { action: 'current-year' } })
+
+      if (yearError) throw await invokeError(yearError, 'Année scolaire courante introuvable.')
+
+      const yearData = yearResponse?.school_year
+      if (yearResponse?.error || typeof yearData !== 'string' || !yearData) {
+        throw new Error(yearResponse?.error ?? 'Année scolaire courante introuvable.')
+      }
+
+      setSchoolYear(yearData)
+
+      const [membershipResult, historyResult] = await Promise.all([
+        supabase
+          .from('patrol_memberships')
+          .select('youth_id, patrol_id, school_year, post_name')
+          .eq('school_year', yearData),
+        supabase.functions.invoke<{ history?: HistoryEntry[]; error?: string }>(
+          'manage-patrols',
+          { body: { action: 'history' } },
+        ),
+      ])
+
+      if (membershipResult.error) {
+        throw new Error(`Chargement des affectations impossible : ${membershipResult.error.message}`)
+      }
+
+      if (historyResult.error) {
+        throw await invokeError(historyResult.error, 'Lecture de l’historique impossible.')
+      }
+
+      if (historyResult.data?.error) {
+        throw new Error(historyResult.data.error)
+      }
+
+      const rows = (membershipResult.data ?? []) as Membership[]
+      setMemberships(rows)
+      setDrafts(Object.fromEntries(rows.map((row) => [row.youth_id, {
+        patrolId: row.patrol_id,
+        postName: row.post_name === 'C.P.' || row.post_name === 'S.P.' ? row.post_name : 'member',
+      }])))
+      setHistory(historyResult.data?.history ?? [])
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Chargement des affectations impossible.')
+    } finally {
       setLoading(false)
-      return
     }
-    const yearData = yearResponse?.school_year
-    if (yearResponse?.error || typeof yearData !== 'string' || !yearData) {
-      setError(yearResponse?.error ?? 'Année scolaire courante introuvable.')
-      setLoading(false)
-      return
-    }
-    setSchoolYear(yearData)
-    const [membershipResult, historyResult] = await Promise.all([
-      supabase.from('patrol_memberships').select('youth_id, patrol_id, school_year, post_name').eq('school_year', yearData),
-      supabase.functions.invoke<{ history?: HistoryEntry[]; error?: string }>('manage-patrols', { body: { action: 'history' } }),
-    ])
-    if (membershipResult.error) {
-      setError(`Chargement des affectations impossible : ${membershipResult.error.message}`)
-      setLoading(false)
-      return
-    }
-    if (historyResult.error) {
-      setError((await invokeError(historyResult.error, 'Lecture de l’historique impossible.')).message)
-    } else if (historyResult.data?.error) {
-      setError(historyResult.data.error)
-    }
-    const rows = (membershipResult.data ?? []) as Membership[]
-    setMemberships(rows)
-    setDrafts(Object.fromEntries(rows.map((row) => [row.youth_id, {
-      patrolId: row.patrol_id,
-      postName: row.post_name === 'C.P.' || row.post_name === 'S.P.' ? row.post_name : 'member',
-    }])))
-    setHistory(historyResult.data?.history ?? [])
-    setLoading(false)
   }, [])
 
   useEffect(() => { void load() }, [load, patrols])

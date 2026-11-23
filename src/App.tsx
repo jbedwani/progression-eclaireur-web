@@ -63,9 +63,11 @@ function getPasswordErrorMessage(error: {
 function InvitationPage({
   authLoading,
   session,
+  profile,
 }: {
   authLoading: boolean
   session: ReturnType<typeof useAuth>['session']
+  profile: ReturnType<typeof useAuth>['profile']
 }) {
   const token = new URLSearchParams(window.location.search).get('token') ?? ''
   const [password, setPassword] = useState('')
@@ -73,6 +75,7 @@ function InvitationPage({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [acceptedExistingAccount, setAcceptedExistingAccount] = useState(false)
   const passwordRequirements = [
     {
       label: 'Au moins 12 caractères',
@@ -104,33 +107,29 @@ function InvitationPage({
     event.preventDefault()
     setError('')
 
+    const hadExistingProfile = Boolean(profile)
+
     if (!token || token.length < 32 || token.length > 256) {
       setError('Lien invalide ou incomplet. Demandez une nouvelle invitation.')
       return
     }
 
-    if (!passwordIsValid) {
-      setError('Le mot de passe ne respecte pas toutes les exigences.')
-      return
-    }
+    // Un compte existant possède déjà son mot de passe.
+    if (!profile) {
+      if (!passwordIsValid) {
+        setError('Le mot de passe ne respecte pas toutes les exigences.')
+        return
+      }
 
-    if (password !== confirmation) {
-      setError('Les mots de passe ne correspondent pas.')
-      return
+      if (password !== confirmation) {
+        setError('Les mots de passe ne correspondent pas.')
+        return
+      }
     }
 
     setLoading(true)
 
     try {
-      const { error: passwordError } = await supabase.auth.updateUser({
-        password,
-      })
-
-      if (passwordError) {
-        setError(getPasswordErrorMessage(passwordError))
-        return
-      }
-
       const { error: acceptError } = await supabase.functions.invoke(
         'manage-invitations',
         { body: { action: 'accept', token } },
@@ -138,11 +137,26 @@ function InvitationPage({
 
       if (acceptError) {
         setError(
-          'Activation impossible. Réessayez ou demandez une nouvelle invitation si le lien a expiré.',
+          'Cette invitation a été révoquée, expirée ou n’est plus valide. Demandez une nouvelle invitation à votre responsable.',
         )
         return
       }
 
+      // Définir un mot de passe uniquement pour un nouveau compte.
+      if (!profile) {
+        const { error: passwordError } = await supabase.auth.updateUser({
+          password,
+        })
+
+        if (passwordError) {
+          setError(
+            `Invitation acceptée, mais le mot de passe n'a pas pu être défini. ${getPasswordErrorMessage(passwordError)} Vous pouvez réessayer.`,
+          )
+          return
+        }
+      }
+
+      setAcceptedExistingAccount(hadExistingProfile)
       setSuccess(true)
     } catch {
       setError('Une erreur est survenue. Réessayez.')
@@ -172,86 +186,114 @@ function InvitationPage({
     return (
       <main className="login-page">
         <section className="login-card">
-          <h1>Compte activé !</h1>
-          <p>Votre mot de passe est défini et votre compte est activé.</p>
+          <h1>{acceptedExistingAccount ? 'Dossiers associés !' : 'Compte activé !'}</h1>
+          <p>
+            {acceptedExistingAccount
+              ? 'Les dossiers ont été associés à votre compte.'
+              : 'Votre mot de passe est défini et votre compte est activé.'}
+          </p>
           <button type="button" onClick={() => window.location.assign('/')}>
-            Aller à la connexion
+            Accéder à mon espace
           </button>
         </section>
       </main>
     )
   }
 
+
   return (
     <main className="login-page">
       <section className="login-card">
-        <h1>Terminer votre inscription</h1>
-        <p className="intro">Choisissez un mot de passe pour votre espace scout.</p>
+        <h1>{profile ? 'Associer les dossiers à votre compte' : 'Terminer votre inscription'}</h1>
+        <p className="intro">
+          {profile
+            ? 'Confirmez cette invitation pour associer les dossiers à votre compte existant.'
+            : 'Choisissez un mot de passe pour votre espace scout.'}
+        </p>
 
-        <form onSubmit={handleAccept}>
-          <label htmlFor="new-password">Nouveau mot de passe</label>
-          <input
-            id="new-password"
-            type="password"
-            autoComplete="new-password"
-            minLength={12}
-            required
-            value={password}
-            onChange={(event) => {
-              setPassword(event.target.value)
-              setError('')
-            }}
-          />
-
-          <ul className="password-requirements" aria-live="polite">
-            {passwordRequirements.map((requirement) => {
-              const satisfied = requirement.test(password)
-
-              return (
-                <li
-                  key={requirement.label}
-                  className={satisfied ? 'password-requirement is-valid' : 'password-requirement'}
-                >
-                  <span aria-hidden="true">
-                    {satisfied ? '✓' : '○'}
-                  </span>
-                  {requirement.label}
-                </li>
-              )
-            })}
-          </ul>
-
-          <label htmlFor="confirm-password">Confirmer le mot de passe</label>
-          <input
-            id="confirm-password"
-            type="password"
-            autoComplete="new-password"
-            minLength={12}
-            required
-            value={confirmation}
-            onChange={(event) => {
-              setConfirmation(event.target.value)
-              setError('')
-            }}
-          />
-
-          {confirmation.length > 0 && (
-            <p className={password === confirmation ? 'password-match' : 'password-mismatch'}>
-              {password === confirmation
-                ? 'Les mots de passe correspondent.'
-                : 'Les mots de passe ne correspondent pas.'}
+        {profile ? (
+          <form onSubmit={handleAccept}>
+            <p>
+              Vous êtes déjà connecté à votre compte. Confirmez l’invitation
+              pour associer les dossiers à votre compte.
             </p>
-          )}
 
-          {error && <p className="login-message" role="alert">{error}</p>}
+            {error && (
+              <p className="login-message" role="alert">{error}</p>
+            )}
 
-          <button
-            type="submit"
-            disabled={loading || !passwordIsValid || password !== confirmation}
-          >
-            {loading ? 'Activation en cours…' : 'Définir le mot de passe et activer'}
-          </button>
-        </form>
+            <button type="submit" disabled={loading}>
+              {loading ? 'Association en cours…' : 'Confirmer et associer les dossiers'}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleAccept}>
+            <label htmlFor="new-password">Nouveau mot de passe</label>
+            <input
+              id="new-password"
+              type="password"
+              autoComplete="new-password"
+              minLength={12}
+              required
+              value={password}
+              onChange={(event) => {
+                setPassword(event.target.value)
+                setError('')
+              }}
+            />
+
+            <ul className="password-requirements" aria-live="polite">
+              {passwordRequirements.map((requirement) => {
+                const satisfied = requirement.test(password)
+
+                return (
+                  <li
+                    key={requirement.label}
+                    className={satisfied ? 'password-requirement is-valid' : 'password-requirement'}
+                  >
+                    <span aria-hidden="true">
+                      {satisfied ? '✓' : '○'}
+                    </span>
+                    {requirement.label}
+                  </li>
+                )
+              })}
+            </ul>
+
+            <label htmlFor="confirm-password">Confirmer le mot de passe</label>
+            <input
+              id="confirm-password"
+              type="password"
+              autoComplete="new-password"
+              minLength={12}
+              required
+              value={confirmation}
+              onChange={(event) => {
+                setConfirmation(event.target.value)
+                setError('')
+              }}
+            />
+
+            {confirmation.length > 0 && (
+              <p className={password === confirmation ? 'password-match' : 'password-mismatch'}>
+                {password === confirmation
+                  ? 'Les mots de passe correspondent.'
+                  : 'Les mots de passe ne correspondent pas.'}
+              </p>
+            )}
+
+            {error && (
+              <p className="login-message" role="alert">{error}</p>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading || !passwordIsValid || password !== confirmation}
+            >
+              {loading ? 'Activation en cours…' : 'Définir le mot de passe et activer'}
+            </button>
+          </form>
+        )}
       </section>
     </main>
   )
@@ -267,7 +309,13 @@ function App() {
   const [resetNotice, setResetNotice] = useState('')
 
   if (window.location.pathname === '/invite') {
-    return <InvitationPage authLoading={authLoading} session={session} />
+    return (
+      <InvitationPage
+        authLoading={authLoading}
+        session={session}
+        profile={profile}
+      />
+    )
   }
 
   if (window.location.pathname === '/reset-password') {
