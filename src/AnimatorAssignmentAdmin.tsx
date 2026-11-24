@@ -4,6 +4,7 @@ import { supabase } from './lib/supabase'
 type Animator = {
   id: string
   display_name: string | null
+  email: string | null
 }
 
 type Unit = {
@@ -42,13 +43,8 @@ export default function AnimatorAssignmentAdmin({
         { data: unitData, error: unitError },
         { data: assignmentData, error: assignmentError },
       ] = await Promise.all([
-        supabase
-          .from('profiles')
-          .select('id, display_name')
-          .eq('role', 'animator')
-          .eq('active', true)
-          .order('display_name'),
-        supabase
+          supabase.rpc('list_active_animators_with_email'),
+          supabase
           .from('units')
           .select('id, name')
           .eq('active', true)
@@ -62,7 +58,17 @@ export default function AnimatorAssignmentAdmin({
       if (unitError) throw unitError
       if (assignmentError) throw assignmentError
 
-      const loadedAnimators = animatorData ?? []
+      const animatorRows = (animatorData ?? []) as {
+        animator_id: string
+        display_name: string | null
+        email: string | null
+      }[]
+
+      const loadedAnimators: Animator[] = animatorRows.map((animator) => ({
+        id: animator.animator_id,
+        display_name: animator.display_name,
+        email: animator.email,
+      }))
 
       setAnimators(loadedAnimators)
       setUnits(unitData ?? [])
@@ -252,35 +258,41 @@ export default function AnimatorAssignmentAdmin({
               {animators.map((animator) => (
                 <tr key={animator.id}>
                   <th scope="row">
-                    <div className="assignment-name-editor">
-                    <input
-                        type="text"
-                        value={names[animator.id] ?? ''}
-                        onChange={(event) =>
-                        setNames((current) => ({
-                            ...current,
-                            [animator.id]: event.target.value,
-                        }))
-                        }
-                        placeholder="Prénom et nom"
-                        maxLength={100}
-                        aria-label={`Nom de l’animateur ${animator.display_name ?? ''}`}
-                        disabled={savingName !== null}
-                    />
+                    <div className="assignment-animator-info">
+                      <div className="assignment-animator-email">
+                        {animator.email || 'Courriel indisponible'}
+                      </div>
 
-                    <button
-                        type="button"
-                        className="secondary-button"
-                        onClick={() => void handleNameSave(animator)}
-                        disabled={
-                        savingName !== null ||
-                        !(names[animator.id] ?? '').trim() ||
-                        (names[animator.id] ?? '').trim() ===
-                            (animator.display_name ?? '')
-                        }
-                    >
-                        {savingName === animator.id ? 'Enregistrement…' : 'Enregistrer'}
-                    </button>
+                      <div className="assignment-name-editor">
+                        <input
+                          type="text"
+                          value={names[animator.id] ?? ''}
+                          onChange={(event) =>
+                            setNames((current) => ({
+                              ...current,
+                              [animator.id]: event.target.value,
+                            }))
+                          }
+                          placeholder="Prénom et nom"
+                          maxLength={100}
+                          aria-label={`Nom de l’animateur ${animator.display_name ?? ''}`}
+                          disabled={savingName !== null}
+                        />
+
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => void handleNameSave(animator)}
+                          disabled={
+                            savingName !== null ||
+                            !(names[animator.id] ?? '').trim() ||
+                            (names[animator.id] ?? '').trim() ===
+                              (animator.display_name ?? '')
+                          }
+                        >
+                          {savingName === animator.id ? 'Enregistrement…' : 'Enregistrer'}
+                        </button>
+                      </div>
                     </div>
                   </th>
 

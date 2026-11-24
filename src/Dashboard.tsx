@@ -57,7 +57,7 @@ export default function Dashboard({ profile, email, onSignOut, signingOut }: {
   const navigation = navByRole[profile.role]
   const [section, setSection] = useState<Section>(navigation[0].id)
   const [search, setSearch] = useState('')
-  const [showInactive, setShowInactive] = useState(true)
+  const [showInactive, setShowInactive] = useState(false)
   const [selectedYouth, setSelectedYouth] = useState<YouthRecord | null>(null)
   const [units, setUnits] = useState<UnitRecord[]>([])
   const [youth, setYouth] = useState<YouthRecord[]>([])
@@ -79,10 +79,18 @@ export default function Dashboard({ profile, email, onSignOut, signingOut }: {
         error?: string
       }>('manage-patrols', { body: { action: 'current-year' } })
 
+      if (yearError instanceof FunctionsHttpError) {
+        const details = await yearError.context.json().catch(() => null)
+        throw new Error(
+          `Impossible de récupérer l’année scolaire courante. ${
+            details?.details ?? details?.error ?? yearError.message
+          }${details?.code ? ` (code: ${details.code})` : ''}`
+        )
+      }
+
       if (yearError) {
         throw new Error(`Impossible de récupérer l’année scolaire courante. ${yearError.message}`)
       }
-
       const schoolYear = yearResponse?.school_year
 
       if (yearResponse?.error || typeof schoolYear !== 'string' || !schoolYear) {

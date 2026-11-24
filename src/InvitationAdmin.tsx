@@ -247,8 +247,9 @@ export default function InvitationAdmin({ youth }: InvitationAdminProps) {
               <p>Aucun dossier de jeune actif disponible.</p>
             ) : (
               youth.map((record) => (
-                <label key={record.id}>
+                <label key={record.id} className="invitation-youth-option">
                   <input
+                    className="invitation-youth-option-control"
                     type={role === 'youth' ? 'radio' : 'checkbox'}
                     name={role === 'youth' ? 'invitation-youth' : undefined}
                     checked={selectedYouthIds.includes(record.id)}
@@ -264,7 +265,7 @@ export default function InvitationAdmin({ youth }: InvitationAdminProps) {
                       }
                     }}
                   />
-                  {record.name}
+                  <span>{record.name}</span>
                 </label>
               ))
             )}
