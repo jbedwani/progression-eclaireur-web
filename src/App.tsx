@@ -62,20 +62,25 @@ function getPasswordErrorMessage(error: {
 
 function InvitationPage({
   authLoading,
-  session,
-  profile,
 }: {
   authLoading: boolean
-  session: ReturnType<typeof useAuth>['session']
-  profile: ReturnType<typeof useAuth>['profile']
 }) {
-  const token = new URLSearchParams(window.location.search).get('token') ?? ''
+  const params = new URLSearchParams(window.location.search)
+  const token = params.get('token') ?? ''
+  const tokenHash = params.get('token_hash') ?? ''
+  const rawType = params.get('type')
+  const otpType =
+    rawType === 'invite' || rawType === 'magiclink'
+      ? rawType
+      : null
+
+  const [stage, setStage] = useState<'ready' | 'password' | 'success'>('ready')
   const [password, setPassword] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [success, setSuccess] = useState(false)
   const [acceptedExistingAccount, setAcceptedExistingAccount] = useState(false)
+
   const passwordRequirements = [
     {
       label: 'Au moins 12 caractères',
@@ -103,37 +108,42 @@ function InvitationPage({
     (requirement) => requirement.test(password),
   )
 
-  async function handleAccept(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function handleConfirmInvitation() {
     setError('')
 
-    const hadExistingProfile = Boolean(profile)
-
-    if (!token || token.length < 32 || token.length > 256) {
-      setError('Lien invalide ou incomplet. Demandez une nouvelle invitation.')
+    if (
+      !token ||
+      token.length < 32 ||
+      token.length > 256 ||
+      !tokenHash ||
+      !otpType
+    ) {
+      setError(
+        'Lien invalide ou incomplet. Demandez une nouvelle invitation à votre responsable.',
+      )
       return
-    }
-
-    // Un compte existant possède déjà son mot de passe.
-    if (!profile) {
-      if (!passwordIsValid) {
-        setError('Le mot de passe ne respecte pas toutes les exigences.')
-        return
-      }
-
-      if (password !== confirmation) {
-        setError('Les mots de passe ne correspondent pas.')
-        return
-      }
     }
 
     setLoading(true)
 
     try {
-      const { error: acceptError } = await supabase.functions.invoke(
-        'manage-invitations',
-        { body: { action: 'accept', token } },
-      )
+      // La vérification du lien n'a lieu qu'après le clic de l'utilisateur.
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        token_hash: tokenHash,
+        type: otpType,
+      })
+
+      if (verifyError) {
+        setError(
+          'Ce lien de confirmation est invalide ou a expiré. Demandez une nouvelle invitation à votre responsable.',
+        )
+        return
+      }
+
+      const { data, error: acceptError } =
+        await supabase.functions.invoke('manage-invitations', {
+          body: { action: 'accept', token },
+        })
 
       if (acceptError) {
         setError(
@@ -142,22 +152,57 @@ function InvitationPage({
         return
       }
 
-      // Définir un mot de passe uniquement pour un nouveau compte.
-      if (!profile) {
-        const { error: passwordError } = await supabase.auth.updateUser({
-          password,
-        })
-
-        if (passwordError) {
-          setError(
-            `Invitation acceptée, mais le mot de passe n'a pas pu être défini. ${getPasswordErrorMessage(passwordError)} Vous pouvez réessayer.`,
-          )
-          return
-        }
+      if (typeof data?.requiresPassword !== 'boolean') {
+        setError(
+          'La réponse du service est incomplète. Contactez votre responsable avant de réessayer.',
+        )
+        return
       }
 
-      setAcceptedExistingAccount(hadExistingProfile)
-      setSuccess(true)
+      setAcceptedExistingAccount(!data.requiresPassword)
+
+      // Rafraîchir la session afin que le profil activé soit rechargé.
+      await supabase.auth.refreshSession()
+
+      if (data.requiresPassword) {
+        setStage('password')
+      } else {
+        setStage('success')
+      }
+    } catch {
+      setError('Une erreur est survenue. Réessayez.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleSetPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+
+    if (!passwordIsValid) {
+      setError('Le mot de passe ne respecte pas toutes les exigences.')
+      return
+    }
+
+    if (password !== confirmation) {
+      setError('Les mots de passe ne correspondent pas.')
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      const { error: passwordError } = await supabase.auth.updateUser({
+        password,
+      })
+
+      if (passwordError) {
+        setError(getPasswordErrorMessage(passwordError))
+        return
+      }
+
+      setStage('success')
     } catch {
       setError('Une erreur est survenue. Réessayez.')
     } finally {
@@ -166,33 +211,33 @@ function InvitationPage({
   }
 
   if (authLoading) {
-    return <main className="login-page"><section className="login-card"><h1>Vérification de l’invitation…</h1></section></main>
-  }
-
-  if (!session) {
     return (
       <main className="login-page">
         <section className="login-card">
-          <h1>Invitation</h1>
-          <p className="login-message" role="alert">
-            Le lien n’a pas permis d’ouvrir une session. Ouvrez le lien complet reçu par courriel ou demandez une nouvelle invitation.
-          </p>
+          <h1>Vérification de l’invitation…</h1>
         </section>
       </main>
     )
   }
 
-  if (success) {
+  if (stage === 'success') {
     return (
       <main className="login-page">
         <section className="login-card">
-          <h1>{acceptedExistingAccount ? 'Dossiers associés !' : 'Compte activé !'}</h1>
+          <h1>
+            {acceptedExistingAccount
+              ? 'Dossiers associés !'
+              : 'Compte activé !'}
+          </h1>
           <p>
             {acceptedExistingAccount
               ? 'Les dossiers ont été associés à votre compte.'
               : 'Votre mot de passe est défini et votre compte est activé.'}
           </p>
-          <button type="button" onClick={() => window.location.assign('/')}>
+          <button
+            type="button"
+            onClick={() => window.location.assign('/')}
+          >
             Accéder à mon espace
           </button>
         </section>
@@ -200,34 +245,17 @@ function InvitationPage({
     )
   }
 
+  if (stage === 'password') {
+    return (
+      <main className="login-page">
+        <section className="login-card">
+          <h1>Terminer votre inscription</h1>
+          <p className="intro">
+            Votre invitation est acceptée. Choisissez maintenant un mot de
+            passe pour votre espace scout.
+          </p>
 
-  return (
-    <main className="login-page">
-      <section className="login-card">
-        <h1>{profile ? 'Associer les dossiers à votre compte' : 'Terminer votre inscription'}</h1>
-        <p className="intro">
-          {profile
-            ? 'Confirmez cette invitation pour associer les dossiers à votre compte existant.'
-            : 'Choisissez un mot de passe pour votre espace scout.'}
-        </p>
-
-        {profile ? (
-          <form onSubmit={handleAccept}>
-            <p>
-              Vous êtes déjà connecté à votre compte. Confirmez l’invitation
-              pour associer les dossiers à votre compte.
-            </p>
-
-            {error && (
-              <p className="login-message" role="alert">{error}</p>
-            )}
-
-            <button type="submit" disabled={loading}>
-              {loading ? 'Association en cours…' : 'Confirmer et associer les dossiers'}
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={handleAccept}>
+          <form onSubmit={handleSetPassword}>
             <label htmlFor="new-password">Nouveau mot de passe</label>
             <input
               id="new-password"
@@ -249,7 +277,11 @@ function InvitationPage({
                 return (
                   <li
                     key={requirement.label}
-                    className={satisfied ? 'password-requirement is-valid' : 'password-requirement'}
+                    className={
+                      satisfied
+                        ? 'password-requirement is-valid'
+                        : 'password-requirement'
+                    }
                   >
                     <span aria-hidden="true">
                       {satisfied ? '✓' : '○'}
@@ -260,7 +292,9 @@ function InvitationPage({
               })}
             </ul>
 
-            <label htmlFor="confirm-password">Confirmer le mot de passe</label>
+            <label htmlFor="confirm-password">
+              Confirmer le mot de passe
+            </label>
             <input
               id="confirm-password"
               type="password"
@@ -275,7 +309,13 @@ function InvitationPage({
             />
 
             {confirmation.length > 0 && (
-              <p className={password === confirmation ? 'password-match' : 'password-mismatch'}>
+              <p
+                className={
+                  password === confirmation
+                    ? 'password-match'
+                    : 'password-mismatch'
+                }
+              >
                 {password === confirmation
                   ? 'Les mots de passe correspondent.'
                   : 'Les mots de passe ne correspondent pas.'}
@@ -283,17 +323,51 @@ function InvitationPage({
             )}
 
             {error && (
-              <p className="login-message" role="alert">{error}</p>
+              <p className="login-message" role="alert">
+                {error}
+              </p>
             )}
 
             <button
               type="submit"
-              disabled={loading || !passwordIsValid || password !== confirmation}
+              disabled={
+                loading ||
+                !passwordIsValid ||
+                password !== confirmation
+              }
             >
-              {loading ? 'Activation en cours…' : 'Définir le mot de passe et activer'}
+              {loading
+                ? 'Enregistrement…'
+                : 'Définir mon mot de passe'}
             </button>
           </form>
+        </section>
+      </main>
+    )
+  }
+
+  return (
+    <main className="login-page">
+      <section className="login-card">
+        <h1>Invitation à rejoindre votre espace scout</h1>
+        <p className="intro">
+          Cliquez sur le bouton ci-dessous pour confirmer votre invitation
+          et activer votre accès.
+        </p>
+
+        {error && (
+          <p className="login-message" role="alert">
+            {error}
+          </p>
         )}
+
+        <button
+          type="button"
+          onClick={handleConfirmInvitation}
+          disabled={loading}
+        >
+          {loading ? 'Confirmation en cours…' : 'Confirmer mon invitation'}
+        </button>
       </section>
     </main>
   )
@@ -310,11 +384,7 @@ function App() {
 
   if (window.location.pathname === '/invite') {
     return (
-      <InvitationPage
-        authLoading={authLoading}
-        session={session}
-        profile={profile}
-      />
+      <InvitationPage authLoading={authLoading} />
     )
   }
 
