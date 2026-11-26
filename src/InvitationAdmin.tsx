@@ -422,6 +422,17 @@ export default function InvitationAdmin({ youth }: InvitationAdminProps) {
 
             return (
               <li key={invitation.id} className="invitation-item">
+                <div className="invitation-item-details">
+                  <strong>{invitation.intended_email}</strong>
+                  <span>
+                    Rôle : {invitation.intended_role}
+                  </span>
+                  <span>
+                    Expiration : {new Date(invitation.expires_at).toLocaleDateString('fr-CA')}
+                  </span>
+                  <span>Statut : {status}</span>
+                </div>
+
                 <div className="invitation-item-actions">
                   {canReissue && (
                     <button
