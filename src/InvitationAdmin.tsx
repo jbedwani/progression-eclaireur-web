@@ -177,7 +177,24 @@ export default function InvitationAdmin({ youth }: InvitationAdminProps) {
           },
         )
 
-      if (requestError) throw requestError
+      if (requestError) {
+        const context = (
+          requestError as { context?: Response }
+        ).context
+
+        let details = requestError.message
+
+        if (context) {
+          try {
+            const responseData = await context.clone().json()
+            if (responseData?.error) details = responseData.error
+          } catch {
+            // Conserver le message initial.
+          }
+        }
+
+        throw new Error(details)
+      }
       if (data?.error) throw new Error(data.error)
       if (!data?.success) throw new Error('La révocation a échoué.')
 
@@ -189,6 +206,69 @@ export default function InvitationAdmin({ youth }: InvitationAdminProps) {
           ? cause.message
           : 'Impossible de révoquer cette invitation.',
       )
+    }
+  }
+
+  async function handleReissue(invitation: Invitation) {
+    if (
+      !window.confirm(
+        `Réémettre une invitation pour ${invitation.intended_email} ? L'ancien lien sera révoqué et ne fonctionnera plus.`,
+      )
+    ) {
+      return
+    }
+
+    setError('')
+    setMessage('')
+    setActionLink('')
+    setCreating(true)
+
+    try {
+      const { data, error: requestError } =
+        await supabase.functions.invoke<InvitationResponse>(
+          'manage-invitations',
+          {
+            body: {
+              action: 'reissue',
+              id: invitation.id,
+              expiresInDays: 7,
+            },
+          },
+        )
+
+      if (requestError) throw requestError
+      if (data?.error) throw new Error(data.error)
+      if (!data?.actionLink) {
+        throw new Error('Le nouveau lien n’a pas été retourné.')
+      }
+
+      setActionLink(data.actionLink)
+      setMessage(
+        `Nouvelle invitation créée pour ${invitation.intended_email}. L'ancien lien est révoqué. Copie le nouveau lien ci-dessous.`,
+      )
+
+      await loadInvitations()
+    } catch (cause) {
+      if (cause instanceof FunctionsHttpError) {
+        try {
+          const details = await cause.context.json()
+          setError(
+            typeof details?.error === 'string'
+              ? details.error
+              : `Erreur serveur : ${cause.message}`,
+          )
+        } catch {
+          setError(`Erreur serveur : ${cause.message}`)
+        }
+      } else {
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : 'Impossible de réémettre cette invitation.',
+        )
+      }
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -338,30 +418,33 @@ export default function InvitationAdmin({ youth }: InvitationAdminProps) {
           {invitations.map((invitation) => {
             const status = invitationStatus(invitation)
             const canRevoke = status === 'En attente'
+            const canReissue = status === 'En attente' || status === 'Expirée'
 
             return (
               <li key={invitation.id} className="invitation-item">
-                <div className="invitation-item-details">
-                  <strong>{invitation.intended_email}</strong>
-                  <span>{roleLabels[invitation.intended_role]}</span>
-                  <span>
-                    Échéance :{' '}
-                    {new Date(invitation.expires_at).toLocaleString('fr-CA')}
-                  </span>
-                  <span className={`invitation-status status-${status.toLowerCase().replace('é', 'e')}`}>
-                    {status}
-                  </span>
-                </div>
+                <div className="invitation-item-actions">
+                  {canReissue && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => void handleReissue(invitation)}
+                      disabled={creating}
+                    >
+                      Réémettre
+                    </button>
+                  )}
 
-                {canRevoke && (
-                  <button
-                    type="button"
-                    className="danger-button"
-                    onClick={() => void handleRevoke(invitation)}
-                  >
-                    Révoquer
-                  </button>
-                )}
+                  {canRevoke && (
+                    <button
+                      type="button"
+                      className="danger-button"
+                      onClick={() => void handleRevoke(invitation)}
+                      disabled={creating}
+                    >
+                      Révoquer
+                    </button>
+                  )}
+                </div>
               </li>
             )
           })}
